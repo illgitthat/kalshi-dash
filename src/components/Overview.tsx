@@ -20,13 +20,35 @@ interface OverviewProps {
   matchedTrades: MatchedTrade[];
 }
 
-const StatCard = ({ title, value, tooltip, className = '' }: { title: string; value: string | number; tooltip: string; className?: string }) => (
-  <div className={`bg-white shadow rounded-lg p-4 relative group ${className}`}>
-    <h3 className="text-sm font-medium text-gray-500">{title}</h3>
-    <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
-    <div className="absolute invisible group-hover:visible bg-gray-800 text-white text-xs rounded p-2 z-10 w-64 -top-2 left-1/2 transform -translate-x-1/2 -translate-y-full">
-      {tooltip}
-      <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2 rotate-45 w-2 h-2 bg-gray-800"></div>
+const StatCard = ({
+  title,
+  value,
+  subValue,
+  icon,
+  trend,
+  className = ''
+}: {
+  title: string;
+  value: string | number;
+  subValue?: string;
+  icon: React.ReactNode;
+  trend?: 'up' | 'down' | 'neutral';
+  className?: string
+}) => (
+  <div className={`bg-white p-6 rounded-xl shadow-sm border border-gray-100 ${className}`}>
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="text-sm font-medium text-gray-500">{title}</h3>
+      <div className={`p-2 rounded-lg ${
+        trend === 'up' ? 'bg-green-50 text-green-600' :
+        trend === 'down' ? 'bg-red-50 text-red-600' :
+        'bg-blue-50 text-blue-600'
+      }`}>
+        {icon}
+      </div>
+    </div>
+    <div className="flex items-baseline">
+      <p className="text-2xl font-bold text-gray-900">{value}</p>
+      {subValue && <span className="ml-2 text-sm text-gray-500">{subValue}</span>}
     </div>
   </div>
 );
@@ -44,156 +66,62 @@ export default function Overview({ stats, trades, matchedTrades }: OverviewProps
   const formatPercent = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'percent',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
     }).format(value);
   };
 
-  const formatCents = (value: number) => {
-    return (value / 100).toFixed(2) + '¢';
+  const formatNumber = (value: number) => {
+    return new Intl.NumberFormat('en-US').format(value);
   };
-
-  const formatDays = (value: number) => {
-    return value.toFixed(1) + ' days';
-  };
-
-  const pairedTrades = matchedTrades || [];
-  const totalRisked = pairedTrades.reduce((sum, trade) => sum + trade.Entry_Cost, 0);
-  const netPnL = pairedTrades.reduce((sum, trade) => sum + trade.Net_Profit, 0);
-  const avgPnlPerDollarRisked = totalRisked > 0 ? netPnL / totalRisked : 0;
-
-  const matchedProfitByTicker = pairedTrades.reduce((acc, trade) => {
-    acc[trade.Ticker] = (acc[trade.Ticker] || 0) + trade.Net_Profit;
-    return acc;
-  }, {} as Record<string, number>);
-  const fallbackProfitByTicker = trades.reduce((acc, trade) => {
-    acc[trade.Ticker] = (acc[trade.Ticker] || 0) + trade.Realized_Profit;
-    return acc;
-  }, {} as Record<string, number>);
-  const profitByTicker = Object.keys(matchedProfitByTicker).length > 0 ? matchedProfitByTicker : fallbackProfitByTicker;
-
-  // Find best and worst tickers
-  const entries = Object.entries(profitByTicker);
-  const [maxTicker, maxProfit] = entries.length
-    ? entries.reduce(([t, p], [t2, p2]) => (p2 > p ? [t2, p2] : [t, p]))
-    : ['N/A', 0];
-  const [minTicker, minProfit] = entries.length
-    ? entries.reduce(([t, p], [t2, p2]) => (p2 < p ? [t2, p2] : [t, p]))
-    : ['N/A', 0];
-
-  const [highestROITrade, highestROI] = pairedTrades.reduce<[MatchedTrade | null, number]>((best, trade) => {
-    if (trade.Entry_Cost <= 0) return best;
-    const currentROI = trade.Net_Profit / trade.Entry_Cost;
-    const [bestTrade, bestROI] = best;
-    return currentROI > bestROI ? [trade, currentROI] : best;
-  }, [null, -Infinity]);
-  const roiValue = Number.isFinite(highestROI) ? highestROI : 0;
-  const roiTicker = highestROITrade?.Ticker || 'N/A';
 
   return (
-    <div className="mt-6">
-      <h2 className="text-xl font-semibold mb-4">Trading Overview</h2>
-      <div className="grid gap-6">
-        {/* Overall Performance */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-700 mb-3">Overall Performance</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Profit"
-              value={formatCurrency(stats.totalProfit)}
-              tooltip="Total profit from all trades"
-              className="border-l-4 border-green-500"
-            />
-            <StatCard
-              title="Total Fees"
-              value={formatCurrency(stats.totalFees)}
-              tooltip="Total fees paid for all trades"
-              className="border-l-4 border-red-500"
-            />
-            <StatCard
-              title="Win Rate"
-              value={formatPercent(stats.winRate)}
-              tooltip="Percentage of trades that resulted in a profit"
-              className="border-l-4 border-blue-500"
-            />
-            <StatCard
-              title="Avg PNL/$ Risked"
-              value={formatPercent(avgPnlPerDollarRisked)}
-              tooltip="Average profit/loss per dollar of capital risked across all trades"
-              className="border-l-4 border-purple-500"
-            />
-          </div>
-        </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <StatCard
+        title="Total Profit"
+        value={formatCurrency(stats.totalProfit)}
+        trend={stats.totalProfit >= 0 ? 'up' : 'down'}
+        icon={
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        }
+      />
 
-        {/* Trading Activity */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-700 mb-3">Trading Activity</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Trades"
-              value={trades.length}
-              tooltip="Total number of trades executed"
-            />
-            <StatCard
-              title="Unique Tickers"
-              value={stats.uniqueTickers}
-              tooltip="Number of different tickers traded"
-            />
-            <StatCard
-              title="Average Hold Time"
-              value={formatDays(stats.weightedHoldingPeriod)}
-              tooltip="Average contract holding period"
-            />
-            <StatCard
-              title="Settlement Win Rate"
-              value={formatPercent(stats.settledWinRate)}
-              tooltip="Win rate for trades held to settlement"
-            />
-          </div>
-        </div>
+      <StatCard
+        title="Win Rate"
+        value={formatPercent(stats.winRate)}
+        subValue={`(${stats.settledWinRate > 0 ? formatPercent(stats.settledWinRate) : '0%'} settled)`}
+        trend={stats.winRate > 0.5 ? 'up' : 'down'}
+        icon={
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        }
+      />
 
-        {/* Entries and Exits */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-700 mb-3">Entries and Exits</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
-            <StatCard
-              title="Avg Entry Price"
-              value={formatCents(stats.avgContractPurchasePrice)}
-              tooltip="Average price paid per contract when entering positions"
-            />
-            <StatCard
-              title="Avg Exit Price"
-              value={formatCents(stats.avgContractFinalPrice)}
-              tooltip="Average price received per contract when positioned are sold or settled"
-            />
-          </div>
-        </div>
+      <StatCard
+        title="Total Trades"
+        value={formatNumber(stats.totalTrades)}
+        subValue={`${stats.uniqueTickers} tickers`}
+        trend="neutral"
+        icon={
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          </svg>
+        }
+      />
 
-        {/* Notable Trades */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-700 mb-3">Notable Trades</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <StatCard
-              title="Biggest Win"
-              value={`${formatCurrency(maxProfit)} (${maxTicker})`}
-              tooltip={`Net profit for ${maxTicker}`}
-              className="border-l-4 border-green-400"
-            />
-            <StatCard
-              title="Biggest Loss"
-              value={`${formatCurrency(minProfit)} (${minTicker})`}
-              tooltip={`Net profit for ${minTicker}`}
-              className="border-l-4 border-red-400"
-            />
-            <StatCard
-              title="Highest ROI"
-              value={`${formatPercent(roiValue)} (${roiTicker})`}
-              tooltip={`${formatCurrency(highestROITrade?.Net_Profit || 0)} profit on ${formatCurrency((highestROITrade?.Entry_Cost || 0))} risked`}
-              className="border-l-4 border-blue-400"
-            />
-          </div>
-        </div>
-      </div>
+      <StatCard
+        title="Total Fees"
+        value={formatCurrency(stats.totalFees)}
+        trend="neutral"
+        icon={
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+          </svg>
+        }
+      />
     </div>
   );
 }

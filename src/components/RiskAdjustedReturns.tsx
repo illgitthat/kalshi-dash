@@ -35,13 +35,13 @@ const calculateRiskMetrics = (matchedTrades: MatchedTrade[], initialCapital: num
   // Get date range
   const startDate = new Date(Math.min(...matchedTrades.map(t => t.Entry_Date.getTime())));
   const endDate = new Date(Math.max(...matchedTrades.map(t => t.Exit_Date.getTime())));
-  
+
   // Create daily portfolio value tracking
   const portfolioValues: { [key: string]: number } = {};
   const dateRange: Date[] = [];
   const currentDate = new Date(startDate);
   currentDate.setHours(0, 0, 0, 0);
-  
+
   while (currentDate <= endDate) {
     const dateKey = currentDate.toISOString().split('T')[0];
     dateRange.push(new Date(currentDate));
@@ -56,11 +56,11 @@ const calculateRiskMetrics = (matchedTrades: MatchedTrade[], initialCapital: num
     .forEach(trade => {
       const exitDateKey = new Date(trade.Exit_Date).toISOString().split('T')[0];
       cumulativeProfit += trade.Realized_Profit;
-      
+
       // Update portfolio value from exit date onwards
       let updateDate = new Date(trade.Exit_Date);
       updateDate.setHours(0, 0, 0, 0);
-      
+
       while (updateDate <= endDate) {
         const updateDateKey = updateDate.toISOString().split('T')[0];
         if (portfolioValues.hasOwnProperty(updateDateKey)) {
@@ -80,7 +80,7 @@ const calculateRiskMetrics = (matchedTrades: MatchedTrade[], initialCapital: num
   for (let i = 1; i < portfolioValueArray.length; i++) {
     const todayValue = portfolioValueArray[i].value;
     const yesterdayValue = portfolioValueArray[i - 1].value;
-    
+
     if (yesterdayValue > 0) {
       const dailyReturn = (todayValue - yesterdayValue) / yesterdayValue;
       dailyReturns.push(dailyReturn);
@@ -105,7 +105,7 @@ const calculateRiskMetrics = (matchedTrades: MatchedTrade[], initialCapital: num
 
   // Calculate metrics using all daily returns (including zero-return days)
   const avgDailyReturn = dailyReturns.reduce((sum, ret) => sum + ret, 0) / dailyReturns.length;
-  
+
   // Calculate standard deviation using all daily returns
   const variance = dailyReturns.reduce((sum, ret) => sum + Math.pow(ret - avgDailyReturn, 2), 0) / dailyReturns.length;
   const standardDeviation = Math.sqrt(variance);
@@ -122,7 +122,7 @@ const calculateRiskMetrics = (matchedTrades: MatchedTrade[], initialCapital: num
   // Annualize metrics
   const annualizedReturn = avgDailyReturn * expectedYearlyTradingDays;
   const annualizedVolatility = standardDeviation * Math.sqrt(expectedYearlyTradingDays);
-  
+
   // Calculate Sharpe ratio
   const excessReturn = avgDailyReturn;
   const sharpeRatio = standardDeviation !== 0 ? excessReturn / standardDeviation : 0;
@@ -157,91 +157,76 @@ export default function RiskAdjustedReturns({ matchedTrades }: RiskAdjustedRetur
   };
 
   return (
-    <div className="mt-6">
-      <h2 className="text-xl font-semibold mb-4">Risk Adjusted Returns</h2>
-      <div className="bg-white shadow rounded-lg p-6">
-        {/* Capital Input */}
-        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-          <label htmlFor="totalCapital" className="block text-sm font-medium text-gray-700 mb-2">
-            Total Account Capital
-          </label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
-            <input
-              id="totalCapital"
-              type="number"
-              value={totalCapital}
-              onChange={(e) => setTotalCapital(Number(e.target.value) || 0)}
-              className="pl-8 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="10000"
-              min="1"
-            />
-          </div>
+    <div className="space-y-6">
+      {/* Capital Input */}
+      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+        <label htmlFor="totalCapital" className="block text-sm font-medium text-gray-700 mb-2">
+          Total Account Capital
+        </label>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+          <input
+            id="totalCapital"
+            type="number"
+            value={totalCapital}
+            onChange={(e) => setTotalCapital(Number(e.target.value) || 0)}
+            className="pl-8 pr-4 py-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+            placeholder="10000"
+            min="1"
+          />
         </div>
-        
-        <div className="text-sm text-gray-600 mb-4">
-          Portfolio Value Method - Daily returns calculated from portfolio value changes, using initial capital of ${metrics.initialCapital.toLocaleString()}
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Total Return */}
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">
-              {formatPercent(metrics.totalReturn)}
-            </div>
-            <div className="text-sm text-gray-500 mt-1">Total Return</div>
-            <div className="text-xs text-gray-400 mt-1">
-              Based on ${metrics.initialCapital.toLocaleString()} initial capital
-            </div>
-          </div>
+        <p className="mt-2 text-xs text-gray-500">
+          Metrics are calculated based on daily portfolio value changes relative to this initial capital.
+        </p>
+      </div>
 
-          {/* Standard Deviation */}
-          <div className="text-center">
-            <div className="text-2xl font-bold text-yellow-600">
-              {formatPercent(metrics.standardDeviation)}
-            </div>
-            <div className="text-sm text-gray-500 mt-1">Daily Volatility</div>
-            <div className="text-xs text-gray-400 mt-1">
-              Standard deviation of daily returns
-            </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Total Return */}
+        <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-100">
+          <div className={`text-2xl font-bold ${metrics.totalReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {formatPercent(metrics.totalReturn)}
           </div>
-
-          {/* Annualized Sharpe Ratio */}
-          <div className="text-center">
-            <div className={`text-2xl font-bold ${metrics.annualizedSharpe >= 1 ? 'text-green-600' : metrics.annualizedSharpe >= 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-              {formatNumber(metrics.annualizedSharpe, 2)}
-            </div>
-            <div className="text-sm text-gray-500 mt-1">Annualized Sharpe Ratio</div>
-            <div className="text-xs text-gray-400 mt-1">
-              Risk-adjusted return measure
-            </div>
-          </div>
+          <div className="text-sm text-gray-600 mt-1">Total Return</div>
         </div>
 
-        {/* Additional Metrics */}
-        <div className="mt-6 pt-6 border-t border-gray-200">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <div className="text-gray-500">Trading Days</div>
-              <div className="font-semibold">{metrics.tradingDays}</div>
-            </div>
-            <div>
-              <div className="text-gray-500">Avg Daily Return</div>
-              <div className="font-semibold">{formatPercent(metrics.avgDailyReturn)}</div>
-            </div>
-            <div>
-              <div className="text-gray-500">Annualized Return</div>
-              <div className="font-semibold">{formatPercent(metrics.annualizedReturn)}</div>
-            </div>
-            <div>
-              <div className="text-gray-500">Annualized Volatility</div>
-              <div className="font-semibold">{formatPercent(metrics.annualizedVolatility)}</div>
-            </div>
+        {/* Standard Deviation */}
+        <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-100">
+          <div className="text-2xl font-bold text-blue-600">
+            {formatPercent(metrics.standardDeviation)}
           </div>
+          <div className="text-sm text-gray-600 mt-1">Daily Volatility</div>
         </div>
 
+        {/* Annualized Sharpe Ratio */}
+        <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-100">
+          <div className={`text-2xl font-bold ${metrics.annualizedSharpe >= 1 ? 'text-green-600' : metrics.annualizedSharpe >= 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+            {formatNumber(metrics.annualizedSharpe, 2)}
+          </div>
+          <div className="text-sm text-gray-600 mt-1">Sharpe Ratio</div>
+        </div>
+      </div>
 
+      {/* Additional Metrics */}
+      <div className="pt-4 border-t border-gray-100">
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Trading Days</span>
+            <span className="font-medium text-gray-900">{metrics.tradingDays}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Avg Daily Return</span>
+            <span className="font-medium text-gray-900">{formatPercent(metrics.avgDailyReturn)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Ann. Return</span>
+            <span className="font-medium text-gray-900">{formatPercent(metrics.annualizedReturn)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Ann. Volatility</span>
+            <span className="font-medium text-gray-900">{formatPercent(metrics.annualizedVolatility)}</span>
+          </div>
+        </div>
       </div>
     </div>
   );
-} 
+}

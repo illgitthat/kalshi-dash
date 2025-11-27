@@ -1,252 +1,203 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Chart as ChartJS,
-  TimeScale,
+  CategoryScale,
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
+  TimeScale,
+  ChartOptions
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Line, Bar } from 'react-chartjs-2';
 import 'chartjs-adapter-date-fns';
+import { enUS } from 'date-fns/locale';
 
 ChartJS.register(
-  TimeScale,
+  CategoryScale,
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  TimeScale
 );
 
 interface PnlChartProps {
   trades: any[];
 }
 
-interface Trade {
-  Ticker: string;
-  Created: string;
-  Date: Date;
-  Realized_Profit: number;
-  Type: string;
-  Direction: string;
-  Contracts: number;
-  Average_Price: number;
-  Realized_Revenue: number;
-}
-
-interface TradeDetail {
-  ticker: string;
-  profit: number;
-  type: string;
-  direction: string;
-  contracts: number;
-  price: number;
-}
-
-interface CumulativePnlItem {
-  timestamp: number;
-  pnl: number;
-  trades: {
-    ticker: string;
-    profit: number;
-    type: string;
-    direction: string;
-    contracts: number;
-    price: number;
-  }[];
-}
-
-type TimePoint = [number, Trade[]];
-
 export default function PnlChart({ trades }: PnlChartProps) {
-  const [chartData, setChartData] = useState<any>(null);
+  const [viewMode, setViewMode] = useState<'cumulative' | 'daily'>('cumulative');
 
-  useEffect(() => {
-    if (!trades || trades.length === 0) {
-      setChartData(null);
-      return;
-    }
+  const chartData = useMemo(() => {
+    if (!trades || trades.length === 0) return null;
 
-    // Sort trades by the pre-parsed Date object
+    // Sort trades by date
     const sortedTrades = [...trades].sort(
-      (a, b) => a.Date.getTime() - b.Date.getTime()
+      (a, b) => new Date(a.Date).getTime() - new Date(b.Date).getTime()
     );
 
-    // Add a starting point at 0 PNL one day before the first trade
-    const firstTradeDate = new Date(sortedTrades[0].Date);
-    const startTimestamp = firstTradeDate.setDate(firstTradeDate.getDate() - 1);
+    if (viewMode === 'cumulative') {
+      let cumulativePnl = 0;
+      const dataPoints = sortedTrades.map(trade => {
+        cumulativePnl += trade.Realized_Profit;
+        return {
+          x: new Date(trade.Date),
+          y: cumulativePnl
+        };
+      });
 
-    const dataPoints: {x: number, y: number, trades: TradeDetail[]}[] = [{
-      x: startTimestamp,
-      y: 0,
-      trades: []
-    }];
-    
-    // Calculate cumulative PNL
-    let cumulativePnl = 0;
-    sortedTrades.forEach(trade => {
-      cumulativePnl += trade.Realized_Profit;
-      
-      // Group trades that occur at the exact same time
-      const lastPoint = dataPoints[dataPoints.length - 1];
-      if (lastPoint && lastPoint.x === trade.Date.getTime()) {
-        lastPoint.y = cumulativePnl;
-        lastPoint.trades.push({
-            ticker: trade.Ticker,
-            profit: trade.Realized_Profit,
-            type: trade.Type,
-            direction: trade.Direction,
-            contracts: trade.Contracts,
-            price: trade.Average_Price,
-        });
-      } else {
-        dataPoints.push({
-          x: trade.Date.getTime(),
-          y: cumulativePnl,
-          trades: [{
-            ticker: trade.Ticker,
-            profit: trade.Realized_Profit,
-            type: trade.Type,
-            direction: trade.Direction,
-            contracts: trade.Contracts,
-            price: trade.Average_Price,
-          }]
-        });
+      // Add start point
+      if (dataPoints.length > 0) {
+        const firstDate = new Date(dataPoints[0].x);
+        firstDate.setDate(firstDate.getDate() - 1);
+        dataPoints.unshift({ x: firstDate, y: 0 });
       }
-    });
 
-    setChartData({
-      datasets: [
-        {
-          label: 'Cumulative PNL ($)',
-          data: dataPoints,
-          borderColor: 'rgb(75, 192, 192)',
-          backgroundColor: 'rgba(75, 192, 192, 0.5)',
-          tension: 0.1,
-          pointRadius: (ctx: any) => {
-            const index = ctx.dataIndex;
-            const point = dataPoints[index];
-            return point && point.trades.length > 1 ? 5 : 3;
+      return {
+        datasets: [
+          {
+            label: 'Cumulative PnL',
+            data: dataPoints,
+            borderColor: 'rgb(75, 192, 192)',
+            backgroundColor: 'rgba(75, 192, 192, 0.5)',
+            tension: 0.1,
+            fill: true,
+            pointRadius: 0,
+            pointHoverRadius: 4,
           },
-          pointHoverRadius: (ctx: any) => {
-            const index = ctx.dataIndex;
-            const point = dataPoints[index];
-            return point && point.trades.length > 1 ? 7 : 5;
-          },
-        },
-      ],
-    });
-  }, [trades]);
+        ],
+      };
+    } else {
+      // Group by day
+      const dailyPnl = new Map<string, number>();
 
-  const options = {
+      sortedTrades.forEach(trade => {
+        const dateStr = new Date(trade.Date).toISOString().split('T')[0];
+        const current = dailyPnl.get(dateStr) || 0;
+        dailyPnl.set(dateStr, current + trade.Realized_Profit);
+      });
+
+      const sortedDates = Array.from(dailyPnl.keys()).sort();
+      const dataPoints = sortedDates.map(date => ({
+        x: new Date(date),
+        y: dailyPnl.get(date) || 0
+      }));
+
+      return {
+        datasets: [
+          {
+            label: 'Daily PnL',
+            data: dataPoints,
+            backgroundColor: dataPoints.map(d => d.y >= 0 ? 'rgba(75, 192, 192, 0.6)' : 'rgba(255, 99, 132, 0.6)'),
+            borderColor: dataPoints.map(d => d.y >= 0 ? 'rgb(75, 192, 192)' : 'rgb(255, 99, 132)'),
+            borderWidth: 1,
+          },
+        ],
+      };
+    }
+  }, [trades, viewMode]);
+
+  const options: ChartOptions<any> = {
     responsive: true,
     maintainAspectRatio: false,
+    interaction: {
+      mode: 'index',
+      intersect: false,
+    },
     plugins: {
       legend: {
-        position: 'top' as const,
-      },
-      title: {
-        display: true,
-        text: 'Cumulative PNL Over Time',
-        font: {
-          size: 16,
-        },
+        display: false,
       },
       tooltip: {
         callbacks: {
-          title: (context: any) => {
-            const date = new Date(context[0].parsed.x);
-            return date.toLocaleDateString('en-US', {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            });
-          },
           label: (context: any) => {
-            const index = context.dataIndex;
-            const dataPoint = chartData.datasets[0].data[index];
-            const trades = dataPoint.trades || [];
-            
-            if (trades.length === 0) {
-              return `PNL: ${formatCurrency(context.parsed.y)}`;
+            let label = context.dataset.label || '';
+            if (label) {
+              label += ': ';
             }
-
-            const lines = [
-              `Total PNL: ${formatCurrency(context.parsed.y)}`,
-              `Trades: ${trades.length}`,
-              '',
-              ...trades.map((t: any) => 
-                `${t.ticker} (${t.type}, ${t.direction}): ${formatCurrency(t.profit)}`
-              )
-            ];
-            return lines;
-          }
-        }
-      }
-    },
-    scales: {
-      y: {
-        type: 'linear' as const,
-        beginAtZero: false,
-        grid: {
-          color: 'rgba(0, 0, 0, 0.1)',
-        },
-        ticks: {
-          callback: function(this: any, tickValue: number | string) {
-            return formatCurrency(Number(tickValue));
+            if (context.parsed.y !== null) {
+              label += new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+              }).format(context.parsed.y);
+            }
+            return label;
           },
         },
       },
+    },
+    scales: {
       x: {
-        type: 'time' as const,
+        type: 'time',
         time: {
-          unit: 'day' as const,
+          unit: 'day',
           displayFormats: {
             day: 'MMM d',
           },
-          tooltipFormat: 'PPpp',
-        },
-        adapters: {
-          date: Date,
         },
         grid: {
-          color: 'rgba(0, 0, 0, 0.1)',
+          display: false,
         },
+      },
+      y: {
         ticks: {
-          maxRotation: 45,
-          minRotation: 45,
+          callback: (value: any) => {
+            return new Intl.NumberFormat('en-US', {
+              style: 'currency',
+              currency: 'USD',
+              maximumFractionDigits: 0,
+            }).format(value);
+          },
+        },
+        grid: {
+          color: 'rgba(0, 0, 0, 0.05)',
         },
       },
     },
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  };
-
-  if (!chartData) return <div>Loading chart data...</div>;
+  if (!chartData) return null;
 
   return (
-    <div className="mt-6">
-      <h2 className="text-xl font-semibold mb-4">PNL Over Time</h2>
-      <div className="bg-white shadow rounded-lg p-4">
-        <div style={{ height: '400px', width: '100%' }}>
-          <Line options={options} data={chartData} />
-        </div>
+    <div className="h-[300px] w-full flex flex-col">
+      <div className="flex justify-end mb-4 space-x-2">
+        <button
+          onClick={() => setViewMode('cumulative')}
+          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+            viewMode === 'cumulative'
+              ? 'bg-blue-100 text-blue-700'
+              : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          Cumulative
+        </button>
+        <button
+          onClick={() => setViewMode('daily')}
+          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+            viewMode === 'daily'
+              ? 'bg-blue-100 text-blue-700'
+              : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          Daily
+        </button>
+      </div>
+      <div className="flex-1 relative">
+        {viewMode === 'cumulative' ? (
+          <Line data={chartData} options={options} />
+        ) : (
+          <Bar data={chartData} options={options} />
+        )}
       </div>
     </div>
   );
-} 
+}

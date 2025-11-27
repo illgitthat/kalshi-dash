@@ -3,12 +3,7 @@
 import { useState, useRef } from 'react';
 import Papa from 'papaparse';
 import { processCSVData, ProcessedData, combineProcessedData } from '@/utils/processData';
-import Overview from '@/components/Overview';
-import PnlChart from './PnlChart';
-import TradeDirectionPie from './TradeDirectionPie';
-import TradeSettlementPie from './TradeSettlementPie';
-import RiskAdjustedReturns from './RiskAdjustedReturns';
-import TradeList from './TradeList';
+import Dashboard from './Dashboard';
 
 interface CsvData {
   headers: string[];
@@ -126,97 +121,89 @@ export default function CsvUploader({ onFileUpload }: CsvUploaderProps) {
         </ol>
       </div>
 
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Upload Transaction CSV Files
-        </label>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            multiple
-            onChange={handleFileUpload}
-            className="block w-full text-sm text-gray-500
-              file:mr-4 file:py-2 file:px-4
-              file:rounded-full file:border-0
-              file:text-sm file:font-semibold
-              file:bg-blue-50 file:text-blue-700
-              hover:file:bg-blue-100"
-          />
-          {uploadedFiles.length > 0 && (
-            <button
-              onClick={clearData}
-              className="px-4 py-2 bg-red-50 text-red-700 rounded-full text-sm font-semibold hover:bg-red-100"
-            >
-              Clear Data
-            </button>
-          )}
-        </div>
-        {uploadedFiles.length > 0 && (
-          <div className="mt-2">
-            <p className="text-sm text-gray-600">Uploaded files:</p>
-            <ul className="list-disc pl-5 text-sm text-gray-600">
-              {uploadedFiles.map((file, index) => (
-                <li key={index}>{file}</li>
-              ))}
-            </ul>
+      {processedData && !loading ? (
+        <Dashboard data={processedData} onClear={clearData} />
+      ) : (
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white shadow-lg rounded-xl p-8 mb-8 border border-gray-100">
+            <h2 className="text-xl font-semibold mb-4 text-gray-800">Get Started</h2>
+            <p className="text-gray-600 mb-4">
+              To analyze your trading history, download your transaction data from Kalshi:
+            </p>
+            <ol className="list-decimal pl-6 mb-6 space-y-2 text-gray-600">
+              <li>Log in to your Kalshi account</li>
+              <li>Go to <a href="https://kalshi.com/account/taxes" className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer">Documents</a></li>
+              <li>Download your transaction history CSV files (one for each year)</li>
+              <li>Upload the CSV files below</li>
+            </ol>
+
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Upload Transaction CSV Files
+              </label>
+              <div className="flex flex-col gap-4">
+                <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-blue-500 transition-colors bg-gray-50 hover:bg-blue-50">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    multiple
+                    onChange={handleFileUpload}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="text-center">
+                    <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                      <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <p className="mt-1 text-sm text-gray-600">
+                      <span className="font-medium text-blue-600 hover:text-blue-500">Upload a file</span> or drag and drop
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">CSV up to 10MB</p>
+                  </div>
+                </div>
+
+                {uploadedFiles.length > 0 && (
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Uploaded files:</p>
+                    <ul className="space-y-1">
+                      {uploadedFiles.map((file, index) => (
+                        <li key={index} className="text-sm text-gray-600 flex items-center">
+                          <svg className="w-4 h-4 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                          </svg>
+                          {file}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {loading && (
-        <div className="text-center my-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-          <p className="mt-2">Processing data...</p>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl flex flex-col items-center">
+            <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-600 mb-4"></div>
+            <p className="text-gray-700 font-medium">Processing data...</p>
+          </div>
         </div>
       )}
 
       {error && (
-        <div className="text-red-500 mb-4 whitespace-pre-line">
-          {error}
-        </div>
-      )}
-
-      {processedData && !loading && (
-        <div>
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold mb-4 text-center">Profit & Loss Over Time</h2>
-            <PnlChart trades={processedData.trades} />
-          </div>
-
-          <Overview
-            stats={processedData.basicStats}
-            trades={processedData.trades}
-            matchedTrades={processedData.matchedTrades}
-          />
-
-          <RiskAdjustedReturns
-            matchedTrades={processedData.matchedTrades}
-          />
-
-          <div className="mt-6">
-            <h2 className="text-xl font-semibold mb-4 text-center">Trading Distributions</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white shadow rounded-lg p-6">
-                <h3 className="text-lg font-medium text-gray-700 mb-4 text-center">Trade Direction</h3>
-                <div className="h-[300px] w-full">
-                  <TradeDirectionPie
-                    yesCount={processedData.basicStats.yesNoBreakdown.Yes}
-                    noCount={processedData.basicStats.yesNoBreakdown.No}
-                  />
-                </div>
-              </div>
-              <div className="bg-white shadow rounded-lg p-6">
-                <h3 className="text-lg font-medium text-gray-700 mb-4 text-center">Settlement vs Exit</h3>
-                <div className="h-[300px] w-full">
-                  <TradeSettlementPie trades={processedData.trades} />
-                </div>
-              </div>
+        <div className="max-w-2xl mx-auto mb-6 bg-red-50 border-l-4 border-red-500 p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-red-700 whitespace-pre-line">{error}</p>
             </div>
           </div>
-
-          <TradeList trades={processedData.matchedTrades} />
         </div>
       )}
 

@@ -23,9 +23,9 @@ All processing happens client-side, so your data remains private.
 
 ## Technologies
 
-- Next.js 14
-- React with TypeScript
-- Tailwind CSS
+- Next.js 16
+- React 19 with TypeScript
+- Tailwind CSS v4
 - Chart.js (for data visualization)
 - Papa Parse (for CSV parsing)
 
@@ -46,19 +46,19 @@ All processing happens client-side, so your data remains private.
 
 2. Install dependencies:
    ```bash
-   npm install
+   bun install
    ```
 
 3. Start the development server:
    ```bash
-   npm run dev
+   bun run dev
    ```
 
 4. Open [http://localhost:3000](http://localhost:3000) in your browser
 
 ## Usage
 
-1. Download your transaction CSV files from Kalshi (from the [Documents](https://kalshi.com/account/taxes) section in the Desktop site) 
+1. Download your transaction CSV files from Kalshi (from the [Documents](https://kalshi.com/account/taxes) section in the Desktop site). Supports both legacy and new 2025 export formats.
 2. Upload the files
 3. View your trading analytics and performance metrics
 

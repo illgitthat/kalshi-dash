@@ -64,13 +64,42 @@ export interface ProcessedData {
   };
 }
 
+const LEGACY_COLUMNS = ['ticker', 'type', 'direction', 'contracts', 'average_price', 'created'];
+const NEW_FORMAT_COLUMNS = [
+  'market_ticker',
+  'quantity',
+  'side',
+  'entry_price_cents',
+  'exit_price_cents',
+  'realized_pnl_with_fees_cents'
+];
+
+const normalizeHeader = (header?: string) => header?.trim().toLowerCase() ?? '';
+const parseNumber = (value: unknown): number => {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[$,%]/g, '').trim();
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+const centsToDollars = (value: unknown): number => parseNumber(value) / 100;
+const normalizeDirection = (direction?: string) => {
+  if (!direction) return 'Unknown';
+  const lower = direction.toLowerCase();
+  if (lower === 'yes' || lower === 'y') return 'Yes';
+  if (lower === 'no' || lower === 'n') return 'No';
+  return direction;
+};
+
 // Parse date by converting Kalshi format to standard format for date-fns-tz
 const parseDate = (dateStr: string): Date => {
   try {
     // Check if it's the Kalshi format: "Jan 20, 2025 at 10:04 AM PST"
     const kalshiPattern = /(\w+ \d+, \d+) at (\d+:\d+) ?([AP]M) ([A-Z]{2,4})/i;
     const kalshiMatch = dateStr.match(kalshiPattern);
-    
+
     if (kalshiMatch) {
       // Timezone mapping to UTC offsets
       const timezoneOffsets: Record<string, string> = {
@@ -83,37 +112,37 @@ const parseDate = (dateStr: string): Date => {
         'AST': '-04:00', 'ADT': '-03:00', 'AT': '-04:00',
         'UTC': '+00:00', 'GMT': '+00:00', 'Z': '+00:00'
       };
-      
+
       const [, dateStr, timeStr, ampm, timeZone] = kalshiMatch;
       const upperTimeZone = timeZone.toUpperCase();
       const offset = timezoneOffsets[upperTimeZone] || '-08:00'; // Default to PST
-      
+
       const dateMatch = dateStr.match(/(\w+) (\d+), (\d+)/);
       if (dateMatch) {
         const [, monthName, day, year] = dateMatch;
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const monthIndex = monthNames.indexOf(monthName);
-        
+
         if (monthIndex !== -1) {
           const month = String(monthIndex + 1).padStart(2, '0');
           const dayPadded = day.padStart(2, '0');
-          
+
           // Parse time: "10:04" + "AM" -> "10:04:00"
           const [hours, minutes] = timeStr.split(':');
           let hour24 = parseInt(hours);
-          
+
           if (ampm.toUpperCase() === 'PM' && hour24 !== 12) {
             hour24 += 12;
           } else if (ampm.toUpperCase() === 'AM' && hour24 === 12) {
             hour24 = 0;
           }
-          
+
           const hourPadded = String(hour24).padStart(2, '0');
-          
+
           // Create ISO format: "2025-01-20T10:04:00-10:00"
           const isoFormat = `${year}-${month}-${dayPadded}T${hourPadded}:${minutes}:00${offset}`;
-          
+
           // Use date-fns-tz to parse the ISO format
           const parsed = toDate(isoFormat);
           if (!isNaN(parsed.getTime())) {
@@ -122,7 +151,7 @@ const parseDate = (dateStr: string): Date => {
         }
       }
     }
-    
+
 
     const fallbackDate = new Date(dateStr);
     if (!isNaN(fallbackDate.getTime())) {
@@ -135,6 +164,81 @@ const parseDate = (dateStr: string): Date => {
     console.error("Error parsing date:", dateStr, error);
     return new Date(); // Return current date as fallback
   }
+};
+
+const transformNewFormatRows = (rows: any[]): { trades: Trade[]; matchedTrades: MatchedTrade[] } => {
+  const trades: Trade[] = [];
+  const matchedTrades: MatchedTrade[] = [];
+
+  rows.forEach((row, index) => {
+    if (!row) return;
+
+    const rawType = (row.type || row.Type || '').toString().toLowerCase();
+    if (rawType === 'credit') return;
+
+    const ticker = row.market_ticker || row.Ticker;
+    if (!ticker) return;
+
+    const contracts = parseNumber(row.quantity || row.Contracts);
+    if (contracts <= 0) return;
+
+    const entryPriceCents = parseNumber(row.entry_price_cents || row.Entry_Price);
+    const exitPriceCents = parseNumber(row.exit_price_cents || row.Exit_Price);
+    const openFees = centsToDollars(row.open_fees_cents || row.Open_Fees);
+    const closeFees = centsToDollars(row.close_fees_cents || row.Close_Fees);
+    const pnlWithoutFees = centsToDollars(row.realized_pnl_without_fees_cents || row.Realized_PnL_Without_Fees);
+    const pnlWithFees = centsToDollars(row.realized_pnl_with_fees_cents || row.Realized_PnL_With_Fees);
+
+    const direction = normalizeDirection(row.side || row.Direction);
+    const entryTimestamp = row.open_timestamp || row.entry_timestamp || row.opened_at || row.created_at || row.Created;
+    const exitTimestamp = row.close_timestamp || row.exit_timestamp || row.closed_at || row.updated_at || row.Updated || row.Closed;
+
+    const entryDate = entryTimestamp ? parseDate(entryTimestamp) : new Date(Date.now() - (rows.length - index) * 1000);
+    const exitDate = exitTimestamp ? parseDate(exitTimestamp) : entryDate;
+
+    const entryCost = contracts * (entryPriceCents / 100);
+    const exitProceeds = contracts * (exitPriceCents / 100);
+    const totalFees = openFees + closeFees;
+
+    const isSettlement = exitPriceCents === 0 || exitPriceCents === 100 || rawType === 'settlement';
+    const tradeType = isSettlement ? 'settlement' : 'trade';
+
+    trades.push({
+      Ticker: ticker,
+      Type: tradeType,
+      Direction: direction,
+      Contracts: contracts,
+      Average_Price: entryPriceCents,
+      Realized_Revenue: exitProceeds,
+      Realized_Cost: entryCost,
+      Realized_Profit: pnlWithFees,
+      Fees: totalFees,
+      Created: (exitTimestamp || entryTimestamp || exitDate.toISOString()),
+      Date: exitDate,
+      Trade_Cost: entryCost,
+    });
+
+    matchedTrades.push({
+      Ticker: ticker,
+      Entry_Date: entryDate,
+      Exit_Date: exitDate,
+      Entry_Direction: direction,
+      Exit_Type: tradeType,
+      Contracts: contracts,
+      Entry_Cost: entryCost,
+      Realized_Profit: pnlWithoutFees,
+      Net_Profit: pnlWithFees,
+      Holding_Period_Days: (exitDate.getTime() - entryDate.getTime()) / (24 * 3600 * 1000),
+      ROI: entryCost !== 0 ? pnlWithFees / entryCost : undefined,
+      Entry_Fee: openFees,
+      Exit_Fee: closeFees,
+      Total_Fees: totalFees,
+      Entry_Price: entryPriceCents,
+      Exit_Price: exitPriceCents,
+    });
+  });
+
+  return { trades, matchedTrades };
 };
 
 // Calculate trade cost based on row data
@@ -154,30 +258,30 @@ const calculateTradeCost = (row: Trade): number => {
 const matchTradesFifo = (trades: Trade[]): MatchedTrade[] => {
   // Sort trades by date
   const sortedTrades = [...trades].sort((a, b) => a.Date.getTime() - b.Date.getTime());
-  
+
   // Calculate proper trade costs
   sortedTrades.forEach(trade => {
     trade.Trade_Cost = calculateTradeCost(trade);
   });
-  
+
   // Dictionary to store open positions for each ticker
   const openPositions: Record<string, Position[]> = {};
   const completedTrades: MatchedTrade[] = [];
-  
+
   // Debug counters
   let entryCount = 0;
   let exitCount = 0;
   let unmatchedExits = 0;
-  
+
   for (const trade of sortedTrades) {
     const ticker = trade.Ticker;
     const direction = trade.Direction;
-    
+
     // Initialize position list if needed
     if (!openPositions[ticker]) {
       openPositions[ticker] = [];
     }
-    
+
     if (trade.Type === 'trade' && trade.Realized_Profit === 0) {
       // Entry trade
       entryCount++;
@@ -191,15 +295,15 @@ const matchTradesFifo = (trades: Trade[]): MatchedTrade[] => {
         cost: trade.Trade_Cost,
         is_closed: false
       };
-      
+
       // Add as new position
       openPositions[ticker].push(position);
-      
+
     } else if (trade.Type === 'settlement' || (trade.Type === 'trade' && trade.Realized_Profit !== 0)) {
       // Exit trade
       exitCount++;
       let contractsToClose = trade.Contracts;
-      
+
       // Calculate exit price based on trade type
       let exitPrice: number;
       if (trade.Type === 'settlement') {
@@ -209,52 +313,52 @@ const matchTradesFifo = (trades: Trade[]): MatchedTrade[] => {
         // For exit trades, use the Average_Price
         exitPrice = trade.Average_Price;
       }
-      
+
       const realizedProfitPerContract = trade.Realized_Profit !== 0 ? trade.Realized_Profit / contractsToClose : 0;
       const exitFee = trade.Fees || 0;
-      
+
       // Find matching open positions
-      const matchingPositions = openPositions[ticker]?.filter(p => 
-        !p.is_closed && 
-        (p.direction === direction || 
-        (p.direction === 'Yes' && direction === 'No') || 
+      const matchingPositions = openPositions[ticker]?.filter(p =>
+        !p.is_closed &&
+        (p.direction === direction ||
+        (p.direction === 'Yes' && direction === 'No') ||
         (p.direction === 'No' && direction === 'Yes'))
       );
-      
+
       if (!matchingPositions || matchingPositions.length === 0) {
         unmatchedExits++;
         console.warn(`Warning: Exit without matching entry found for ${ticker} (${direction}) on ${trade.Date}`);
         continue;
       }
-      
+
       // Match with oldest positions first (FIFO)
       for (const position of matchingPositions) {
         if (contractsToClose <= 0) break;
-        
+
         const contractsClosed = Math.min(contractsToClose, position.contracts);
-        
+
         // Calculate proportional profit and costs
         let profit: number;
         let finalExitPrice: number;
-        
+
         if (trade.Type === 'settlement') {
           profit = realizedProfitPerContract * contractsClosed;
           finalExitPrice = exitPrice;
         } else {
           // For opposite direction trades, calculate profit based on price difference
-          (position.direction !== direction) 
+          (position.direction !== direction)
           const entryPrice = position.avg_price;
           finalExitPrice = 100 - exitPrice; // Effective sell price
           profit = contractsClosed * (100 - entryPrice - exitPrice) / 100;
         }
-        
+
         const entryCost = position.cost * (contractsClosed / position.contracts);
-        
+
         // Calculate proportional fees
         const proportionalEntryFee = position.entry_fee * (contractsClosed / position.contracts);
         const proportionalExitFee = exitFee * (contractsClosed / contractsToClose);
         const totalFees = proportionalEntryFee + proportionalExitFee;
-        
+
         const matchedTrade: MatchedTrade = {
           Ticker: position.ticker,
           Entry_Date: position.entry_date,
@@ -273,9 +377,9 @@ const matchTradesFifo = (trades: Trade[]): MatchedTrade[] => {
           Entry_Price: position.avg_price,
           Exit_Price: finalExitPrice
         };
-        
+
         completedTrades.push(matchedTrade);
-        
+
         // Update position
         contractsToClose -= contractsClosed;
         position.contracts -= contractsClosed;
@@ -285,94 +389,63 @@ const matchTradesFifo = (trades: Trade[]): MatchedTrade[] => {
       }
     }
   }
-  
+
   // Clean up closed positions
   for (const ticker in openPositions) {
     openPositions[ticker] = openPositions[ticker].filter(p => !p.is_closed);
   }
-  
+
   console.log("Matching Statistics:");
   console.log(`Entry trades processed: ${entryCount}`);
   console.log(`Exit trades processed: ${exitCount}`);
   console.log(`Unmatched exits: ${unmatchedExits}`);
   console.log(`Open positions remaining: ${Object.values(openPositions).reduce((sum, pos) => sum + pos.length, 0)}`);
-  
+
   return completedTrades;
 };
 
 // Calculate basic statistics
 const calculateBasicStats = (trades: Trade[], matchedTrades: MatchedTrade[]) => {
-  // Unique tickers
   const uniqueTickers = new Set(trades.map(t => t.Ticker)).size;
-  
-  // Yes/No breakdown
+
   const yesNoBreakdown = trades.reduce((acc, trade) => {
-    // For settlements, count contracts in the listed direction
-    if (trade.Type === 'settlement') {
-      acc[trade.Direction] = (acc[trade.Direction] || 0) + trade.Contracts;
-    }
-    else if (trade.Realized_Revenue > 0) {
-      // Count closed contracts in opposite direction
-      const oppositeDir = trade.Direction === 'Yes' ? 'No' : 'Yes';
-      acc[oppositeDir] = (acc[oppositeDir] || 0) + trade.Realized_Revenue;
-      
+    const dir = normalizeDirection(trade.Direction);
+    if (dir === 'Yes' || dir === 'No') {
+      acc[dir] = (acc[dir] || 0) + trade.Contracts;
     }
     return acc;
   }, {} as Record<string, number>);
-  
-  // Total fees and profit directly from trades
+
   const totalFees = trades.reduce((sum, trade) => sum + (trade.Fees || 0), 0);
-  const totalProfit = trades.reduce((sum, trade) => sum + trade.Realized_Profit, 0);
+  const totalProfit = trades.reduce((sum, trade) => sum + (trade.Realized_Profit || 0), 0);
 
-  // Calculate average entry and exit prices from exit trades only
-  let totalWeightedEntryPrice = 0;
-  let totalWeightedExitPrice = 0;
-  let totalExitedContracts = 0;
+  const totalContracts = matchedTrades.reduce((sum, trade) => sum + trade.Contracts, 0);
+  const avgContractPurchasePrice = totalContracts > 0
+    ? matchedTrades.reduce((sum, trade) => sum + trade.Entry_Price * trade.Contracts, 0) / totalContracts
+    : 0;
+  const avgContractFinalPrice = totalContracts > 0
+    ? matchedTrades.reduce((sum, trade) => sum + trade.Exit_Price * trade.Contracts, 0) / totalContracts
+    : 0;
 
-  trades.forEach(trade => {
-    if (trade.Type === 'settlement') {
-      if (trade.Contracts > 0) {
-        totalWeightedEntryPrice += trade.Average_Price * trade.Contracts;
-        totalWeightedExitPrice += (trade.Realized_Revenue > 0 ? 100 : 0) * trade.Contracts;
-        totalExitedContracts += trade.Contracts;
-      }
-    } else if (trade.Realized_Revenue > 0) {
-      // For exit trades with non-zero Realized_Revenue
-      const contracts = trade.Realized_Revenue;
-      const exitPrice = 100 - trade.Average_Price;
-      const entryPrice = (trade.Realized_Cost * 100 - contracts * trade.Average_Price) / contracts;
-      
-      totalWeightedEntryPrice += entryPrice * contracts;
-      totalWeightedExitPrice += exitPrice * contracts;
-      totalExitedContracts += contracts;
-    }
-  });
-
-  const avgContractPurchasePrice = totalExitedContracts > 0 ? totalWeightedEntryPrice / totalExitedContracts : 0;
-  const avgContractFinalPrice = totalExitedContracts > 0 ? totalWeightedExitPrice / totalExitedContracts : 0;
-  
-  // Keep using matchedTrades for holding period calculation
   const totalTradeValue = matchedTrades.reduce((sum, trade) => sum + trade.Entry_Cost, 0);
-  const weightedHoldingPeriod = matchedTrades.reduce((sum, trade) => {
-    const weight = trade.Entry_Cost / totalTradeValue;
-    return sum + (trade.Holding_Period_Days * weight);
-  }, 0);
-  
-  // Win rates based on Realized_Profit
-  const exitTrades = trades.filter(t => t.Realized_Revenue > 0);
-  const profitableTrades = exitTrades.filter(t => t.Realized_Profit > 0);
-  const settledTrades = trades.filter(t => t.Type === 'settlement');
-  const profitableSettledTrades = settledTrades.filter(t => t.Realized_Profit > 0);
-  
-  const winRate = exitTrades.length > 0 ? profitableTrades.length / exitTrades.length : 0;
-  const settledWinRate = settledTrades.length > 0 ? profitableSettledTrades.length / settledTrades.length : 0;
-  
+  const weightedHoldingPeriod = totalTradeValue > 0
+    ? matchedTrades.reduce((sum, trade) => sum + (trade.Holding_Period_Days * (trade.Entry_Cost / totalTradeValue)), 0)
+    : 0;
+
+  const winRate = matchedTrades.length > 0
+    ? matchedTrades.filter(trade => trade.Net_Profit > 0).length / matchedTrades.length
+    : 0;
+  const settledTrades = matchedTrades.filter(trade => trade.Exit_Type === 'settlement');
+  const settledWinRate = settledTrades.length > 0
+    ? settledTrades.filter(trade => trade.Net_Profit > 0).length / settledTrades.length
+    : 0;
+
   return {
     uniqueTickers,
     totalTrades: trades.length,
-    yesNoBreakdown: { 
-      Yes: yesNoBreakdown["Yes"] || 0, 
-      No: yesNoBreakdown["No"] || 0 
+    yesNoBreakdown: {
+      Yes: yesNoBreakdown['Yes'] || 0,
+      No: yesNoBreakdown['No'] || 0,
     },
     totalFees,
     totalProfit,
@@ -380,40 +453,53 @@ const calculateBasicStats = (trades: Trade[], matchedTrades: MatchedTrade[]) => 
     avgContractFinalPrice,
     weightedHoldingPeriod,
     winRate,
-    settledWinRate
+    settledWinRate,
   };
 };
 
 // Main processing function
 export const processCSVData = (results: any): ProcessedData => {
   try {
-    // Validate CSV structure
     if (!results.data || !Array.isArray(results.data) || results.data.length === 0) {
-      throw new Error("Invalid CSV format: No data found");
+      throw new Error('Invalid CSV format: No data found');
     }
-    
-    // Check for required columns
-    const requiredColumns = ['Ticker', 'Type', 'Direction', 'Contracts', 'Average_Price', 'Created'];
-    const headers = results.meta.fields || [];
-    const missingColumns = requiredColumns.filter(col => !headers.includes(col));
-    
-    if (missingColumns.length > 0) {
-      throw new Error(`Invalid CSV format: Missing required columns: ${missingColumns.join(', ')}`);
+
+    const headers = (results.meta?.fields || []).map(normalizeHeader);
+    const hasLegacyColumns = LEGACY_COLUMNS.every(col => headers.includes(col));
+    const hasNewColumns = NEW_FORMAT_COLUMNS.every(col => headers.includes(col));
+
+    if (!hasLegacyColumns && !hasNewColumns) {
+      throw new Error(
+        'Invalid CSV format: Missing required columns for both legacy and new Kalshi exports.'
+      );
     }
-    
+
     const rawData = results.data as any[];
-    
-    // Filter out credit transactions and convert string values and create Date objects
+
+    if (hasNewColumns && !hasLegacyColumns) {
+      const { trades, matchedTrades } = transformNewFormatRows(rawData);
+      if (trades.length === 0) {
+        throw new Error('No valid trades found in the CSV file');
+      }
+
+      const basicStats = calculateBasicStats(trades, matchedTrades);
+      return {
+        originalData: rawData,
+        trades,
+        matchedTrades,
+        basicStats,
+      };
+    }
+
     const trades: Trade[] = rawData
       .filter(row => row && row.Ticker && row.Type !== 'credit')
       .map(row => {
         try {
-          // Clean up monetary columns
           const cleanMoney = (val: string) => {
             if (!val) return 0;
             return parseFloat(val.replace('$', '').trim()) || 0;
           };
-          
+
           const trade: Trade = {
             Ticker: row.Ticker,
             Type: row.Type,
@@ -426,34 +512,32 @@ export const processCSVData = (results: any): ProcessedData => {
             Fees: row.Fees ? cleanMoney(row.Fees) : 0,
             Created: row.Created,
             Date: parseDate(row.Created),
-            Trade_Cost: 0 // Will be calculated later
+            Trade_Cost: 0,
           };
-          
+
           return trade;
         } catch (error) {
-          console.error("Error processing row:", row, error);
+          console.error('Error processing row:', row, error);
           return null;
         }
-      }).filter(Boolean) as Trade[];
-    
+      })
+      .filter(Boolean) as Trade[];
+
     if (trades.length === 0) {
-      throw new Error("No valid trades found in the CSV file");
+      throw new Error('No valid trades found in the CSV file');
     }
-    
-    // Match trades using FIFO
+
     const matchedTrades = matchTradesFifo(trades);
-    
-    // Calculate basic statistics
     const basicStats = calculateBasicStats(trades, matchedTrades);
-    
+
     return {
       originalData: rawData,
       trades,
       matchedTrades,
-      basicStats
+      basicStats,
     };
   } catch (error) {
-    console.error("Error processing CSV data:", error);
+    console.error('Error processing CSV data:', error);
     throw error;
   }
 };
@@ -462,26 +546,26 @@ export const processCSVData = (results: any): ProcessedData => {
 export const combineProcessedData = (dataArray: ProcessedData[]): ProcessedData => {
   // Combine all trades
   const allTrades = dataArray.reduce<Trade[]>((acc, data) => [...acc, ...data.trades], []);
-  
+
   // Sort all trades by date
   const sortedTrades = allTrades.sort((a, b) => a.Date.getTime() - b.Date.getTime());
-  
+
   // Match trades using FIFO across all data
   const matchedTrades = matchTradesFifo(sortedTrades);
-  
+
   // Calculate combined stats
   const basicStats = calculateBasicStats(sortedTrades, matchedTrades);
-  
+
   // Combine original data
   const originalData = dataArray.reduce<any[]>((acc, data) => [...acc, ...data.originalData], []);
-  
+
   return {
     originalData,
     trades: sortedTrades,
     matchedTrades,
     basicStats,
   };
-}; 
+};
 
 // Test function for timezone parsing (can be called from console for debugging)
 export const testTimezoneParsing = () => {
@@ -492,21 +576,21 @@ export const testTimezoneParsing = () => {
     'Jan 20, 2025 at 10:04 AM EST',
     'Jan 20, 2025 at 2:30 PM CST',
     'Jan 20, 2025 at 11:45 PM MST',
-    
+
     // Variations in formatting
     'Jan 20, 2025 at 10:04AM HST', // No space before AM
     'Feb 5, 2025 at 10:04 pm pst', // Lowercase
-    
+
     // ISO formats that date-fns-tz should handle directly
     '2025-01-20T10:04:00-10:00', // HST offset
     '2025-01-20T10:04:00-08:00', // PST offset
     '2025-01-20T10:04:00-05:00', // EST offset
   ];
-  
+
   console.log('Testing timezone parsing (Kalshi format -> ISO -> date-fns-tz):');
   testDates.forEach(dateStr => {
     const parsed = parseDate(dateStr);
     const isValid = !isNaN(parsed.getTime());
     console.log(`${dateStr.padEnd(35)} -> ${parsed.toISOString()} (${isValid ? 'VALID' : 'INVALID'})`);
   });
-}; 
+};

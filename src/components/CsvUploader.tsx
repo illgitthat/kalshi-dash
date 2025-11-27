@@ -40,7 +40,7 @@ export default function CsvUploader({ onFileUpload }: CsvUploaderProps) {
       // Process each file
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        
+
         // Skip if file was already processed
         if (uploadedFiles.includes(file.name)) {
           continue;
@@ -65,8 +65,8 @@ export default function CsvUploader({ onFileUpload }: CsvUploaderProps) {
 
       if (processedDataArray.length > 0) {
         // Combine all processed data
-        const combinedData = processedDataArray.length === 1 
-          ? processedDataArray[0] 
+        const combinedData = processedDataArray.length === 1
+          ? processedDataArray[0]
           : combineProcessedData(processedDataArray);
 
         setProcessedData(combinedData);
@@ -112,7 +112,7 @@ export default function CsvUploader({ onFileUpload }: CsvUploaderProps) {
   return (
     <div className="p-4">
       <h1 className="text-3xl font-bold text-center mb-6">Kalshi Performance Dashboard</h1>
-      
+
       <div className="bg-white shadow rounded-lg p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Instructions</h2>
         <p className="mb-2">
@@ -184,25 +184,26 @@ export default function CsvUploader({ onFileUpload }: CsvUploaderProps) {
             <h2 className="text-xl font-semibold mb-4 text-center">Profit & Loss Over Time</h2>
             <PnlChart trades={processedData.trades} />
           </div>
-          
-          <Overview 
-            stats={processedData.basicStats} 
+
+          <Overview
+            stats={processedData.basicStats}
             trades={processedData.trades}
-          />
-          
-          <RiskAdjustedReturns 
             matchedTrades={processedData.matchedTrades}
           />
-          
+
+          <RiskAdjustedReturns
+            matchedTrades={processedData.matchedTrades}
+          />
+
           <div className="mt-6">
             <h2 className="text-xl font-semibold mb-4 text-center">Trading Distributions</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white shadow rounded-lg p-6">
                 <h3 className="text-lg font-medium text-gray-700 mb-4 text-center">Trade Direction</h3>
                 <div className="h-[300px] w-full">
-                  <TradeDirectionPie 
-                    yesCount={processedData.basicStats.yesNoBreakdown.Yes} 
-                    noCount={processedData.basicStats.yesNoBreakdown.No} 
+                  <TradeDirectionPie
+                    yesCount={processedData.basicStats.yesNoBreakdown.Yes}
+                    noCount={processedData.basicStats.yesNoBreakdown.No}
                   />
                 </div>
               </div>
@@ -214,7 +215,7 @@ export default function CsvUploader({ onFileUpload }: CsvUploaderProps) {
               </div>
             </div>
           </div>
-          
+
           <TradeList trades={processedData.matchedTrades} />
         </div>
       )}
@@ -235,4 +236,4 @@ export default function CsvUploader({ onFileUpload }: CsvUploaderProps) {
       </div>
     </div>
   );
-} 
+}
